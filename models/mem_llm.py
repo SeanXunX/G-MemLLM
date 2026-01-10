@@ -1,7 +1,9 @@
 from typing import Optional
-from transformers import AutoModelForCausalLM
+
 import torch
 import torch.nn as nn
+from transformers import AutoModelForCausalLM
+
 from .latent_mem_bank import LatentMemBank
 
 
@@ -40,6 +42,10 @@ class MemLLM(nn.Module):
         update_memory: bool = True,
         use_memory: bool = True,
     ):
+        # Detach the memory from the previous step's computation graph
+        if self.current_memory is not None:
+            self.current_memory = self.current_memory.detach()
+
         # 1. Get hidden states and logits from the frozen llm
         with torch.no_grad():
             llm_outputs = self.llm(

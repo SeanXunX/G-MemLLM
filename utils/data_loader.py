@@ -1,8 +1,7 @@
-from datasets.utils.py_utils import Literal
-import torch
-from torch.utils.data import Dataset, DataLoader
+from typing import Literal
+
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from torch.utils.data import DataLoader, Dataset
 
 
 def format_hotpot_example(example, is_training=True):
