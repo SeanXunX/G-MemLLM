@@ -1,15 +1,16 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
-from datasets.utils.py_utils import Literal
+from typing import Literal
+
 import torch
-from transformers import AutoTokenizer
+from dotenv import load_dotenv
 from loguru import logger
 from tqdm import tqdm
+from transformers import AutoTokenizer
 
 from models.mem_llm import MemLLM
-from utils.trainer import MemoryTrainer
 from utils.data_loader import get_hotpot_dataloader
+from utils.trainer import MemoryTrainer
 
 
 def get_deivce() -> Literal["cuda", "mps", "cpu"]:
@@ -145,11 +146,11 @@ def main():
 
     # --- 5. Training Loop ---
     for epoch in range(start_epoch, NUM_EPOCHS):
-        logger.info(f"--- Starting Epoch {epoch+1}/{NUM_EPOCHS} ---")
+        logger.info(f"--- Starting Epoch {epoch + 1}/{NUM_EPOCHS} ---")
         model.train()
         model.current_memory = None
 
-        train_pbar = tqdm(train_dataloader, desc=f"Epoch {epoch+1} Training")
+        train_pbar = tqdm(train_dataloader, desc=f"Epoch {epoch + 1} Training")
         for batch in train_pbar:
             batch_on_device = {k: v.to(DEVICE) for k, v in batch.items()}
             loss = trainer.train_step(batch_on_device)
@@ -157,7 +158,7 @@ def main():
 
         # --- Validation ---
         val_loss = evaluate(model, val_dataloader, trainer, DEVICE)
-        logger.info(f"Epoch {epoch+1} finished. Validation Loss: {val_loss:.4f}")
+        logger.info(f"Epoch {epoch + 1} finished. Validation Loss: {val_loss:.4f}")
 
         # --- 6. Checkpointing ---
         if val_loss < early_stopper.best_loss:
@@ -170,7 +171,7 @@ def main():
                 "optimizer_state_dict": trainer.optimizer.state_dict(),
                 "best_val_loss": val_loss,
             }
-            torch.save(checkpoint, CHECKPOINT_DIR / f"epoch_{epoch+1}.pt")
+            torch.save(checkpoint, CHECKPOINT_DIR / f"epoch_{epoch + 1}.pt")
             torch.save(
                 checkpoint, latest_checkpoint
             )  # Overwrite latest for easy resume
