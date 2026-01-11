@@ -1,4 +1,4 @@
-# G-MemLLM: Gated Latent Memory Augmentation for LLMs
+# G-MemLLM: Gated Latent Memory Augmentation for Long-Context Reasoning in Large Language Models
 
 This project introduces **G-MemLLM**, a memory-augmented architecture that integrates a frozen LLM backbone with a trainable **Latent Memory Bank**. It is designed to enhance the multi-hop reasoning and relational knowledge retention of Large Language Models.
 
