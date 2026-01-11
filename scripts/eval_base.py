@@ -6,23 +6,22 @@ import torch
 import yaml
 from loguru import logger
 from tqdm import tqdm
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from models.mem_llm import MemLLM
 from utils.data_loader import get_hotpot_dataloader
 from utils.metrics import calculate_metrics
 
 
 @torch.no_grad()
 def generate_answers(
-    model: MemLLM,
+    model: AutoModelForCausalLM,
     dataloader: torch.utils.data.DataLoader,
     tokenizer: AutoTokenizer,
     device: str,
     max_new_tokens: int = 50,
 ):
     """
-    Generates answers for the entire validation set.
+    Generates answers for the entire validation set using a standard Causal LM.
     """
     model.eval()
     predictions = []
@@ -33,14 +32,12 @@ def generate_answers(
         attention_mask = batch["attention_mask"].to(device)
 
         # For generation, we only need the prompt part of the input
-        # We find the length of the prompt by finding the start of the labels
-        # (where labels are not -100)
         prompt_end_index = (batch["labels"][0] != -100).nonzero(as_tuple=True)[0][0]
         prompt_input_ids = input_ids[:, :prompt_end_index]
         prompt_attention_mask = attention_mask[:, :prompt_end_index]
 
         # Get the maximum length from the model's configuration
-        max_length = model.llm.config.n_positions
+        max_length = model.config.n_positions
         max_prompt_length = max_length - max_new_tokens
 
         # Truncate prompt from the left if it's too long to make space for new tokens
@@ -51,42 +48,22 @@ def generate_answers(
             prompt_input_ids = prompt_input_ids[:, -max_prompt_length:]
             prompt_attention_mask = prompt_attention_mask[:, -max_prompt_length:]
 
-        # --- Autoregressive Generation Loop ---
-        model.current_memory = None  # Reset memory for each new prompt
-        generated_ids = prompt_input_ids
-
-        for _ in range(max_new_tokens):
-            # Prevent the sequence from exceeding the model's max length
-            if generated_ids.shape[1] >= max_length:
-                logger.warning(
-                    f"Sequence length {generated_ids.shape[1]} exceeds model's max length {max_length}. Stopping generation."
-                )
-                break
-
-            outputs = model(
-                input_ids=generated_ids, attention_mask=prompt_attention_mask
-            )
-            # Get the logits for the very last token
-            next_token_logits = outputs["augmented_logits"][:, -1, :]
-            # Use greedy decoding to get the most likely next token
-            next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-
-            # Append the new token to the sequence
-            generated_ids = torch.cat([generated_ids, next_token], dim=1)
-            prompt_attention_mask = torch.cat(
-                [prompt_attention_mask, torch.ones_like(next_token)], dim=1
-            )
-
-            # Stop if the model generates an EOS token
-            if next_token.item() == tokenizer.eos_token_id:
-                break
-
-        # Decode the generated answer and the ground truth
-        # The generated answer is the part after the initial prompt
-        generated_answer = tokenizer.decode(
-            generated_ids[0][prompt_input_ids.shape[1] :], skip_special_tokens=True
+        # Use model.generate for simpler and more efficient generation
+        generated_output = model.generate(
+            input_ids=prompt_input_ids,
+            attention_mask=prompt_attention_mask,
+            max_new_tokens=max_new_tokens,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+            do_sample=False,  # Use greedy decoding
         )
-        # The ground truth is the part of the original input that was masked
+
+        # The generated output contains the prompt + new tokens
+        generated_answer_ids = generated_output[0][prompt_input_ids.shape[1] :]
+        generated_answer = tokenizer.decode(
+            generated_answer_ids, skip_special_tokens=True
+        )
+
         ground_truth_ids = batch["input_ids"][0][prompt_input_ids.shape[1] :]
         ground_truth = tokenizer.decode(ground_truth_ids, skip_special_tokens=True)
 
@@ -118,7 +95,6 @@ def main(config_path: str):
 
     MODEL_NAME = model_config["name"]
     MAX_LENGTH = model_config["max_length"]
-    CHECKPOINT_PATH = model_config["checkpoint_path"]
     BATCH_SIZE = eval_config["batch_size"]
     MAX_NEW_TOKENS = eval_config["max_new_tokens"]
 
@@ -135,9 +111,9 @@ def main(config_path: str):
     logger.add(
         lambda msg: tqdm.write(msg, end=""), colorize=True, level="INFO"
     )  # Tqdm-friendly logger for console
-    log_file_name = f"evaluation_memllm_{MODEL_NAME.replace('/', '_')}.log"
+    log_file_name = f"evaluation_base_{MODEL_NAME.replace('/', '_')}.log"
     logger.add(LOG_DIR / log_file_name, level="DEBUG")  # File logger
-    logger.info(f"Starting evaluation of MemLLM on device: {DEVICE}")
+    logger.info(f"Starting evaluation of base model on device: {DEVICE}")
 
     # --- 4. Load Tokenizer and Model ---
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -146,12 +122,8 @@ def main(config_path: str):
     # For batch generation, decoder-only models need left-side padding
     tokenizer.padding_side = "left"
 
-    logger.info("Loading model and fine-tuned memory weights...")
-    model = MemLLM(MODEL_NAME).to(DEVICE)
-    # Load only the trainable memory module weights
-    model.load_state_dict(
-        torch.load(CHECKPOINT_PATH, map_location=DEVICE), strict=False
-    )
+    logger.info(f"Loading base model: {MODEL_NAME}...")
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME).to(DEVICE)
 
     # --- 5. Load Data ---
     logger.info("Loading validation data...")
@@ -179,9 +151,7 @@ def main(config_path: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Evaluate a memory-augmented LLM on HotpotQA."
-    )
+    parser = argparse.ArgumentParser(description="Evaluate a base LLM on HotpotQA.")
     parser.add_argument(
         "--config",
         type=str,

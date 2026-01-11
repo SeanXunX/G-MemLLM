@@ -1,0 +1,19 @@
+# Default training configuration for HotpotQA
+model:
+  name: "gpt2"
+  max_length: 1024
+
+training:
+  batch_size: 32
+  learning_rate: 0.00005 # 5e-5
+  num_epochs: 10
+  device: "auto" # 'auto' will let the script detect cuda/mps/cpu
+
+early_stopping:
+  patience: 3
+  min_delta: 0.01
+
+paths:
+  hf_home: "./hf_cache"
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"

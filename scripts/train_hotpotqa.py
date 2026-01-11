@@ -1,8 +1,10 @@
+import argparse
 import os
 from pathlib import Path
 from typing import Literal
 
 import torch
+import yaml
 from dotenv import load_dotenv
 from loguru import logger
 from tqdm import tqdm
@@ -80,19 +82,27 @@ def evaluate(
     return total_loss / len(dataloader)
 
 
-def main():
-    # --- 1. Load Environment Variables ---
+def main(config_path: str):
+    # --- 1. Load Configuration ---
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    logger.info(f"Loaded configuration from {config_path}")
+
+    # --- 2. Load Environment Variables ---
     load_dotenv()
     logger.info("Loaded environment variables from .env file.")
 
-    # --- 2. Environment and Path Configuration ---
-    HF_HOME = os.getenv("HF_HOME", "./hf_cache")
-    CHECKPOINT_DIR = Path(os.getenv("CHECKPOINT_DIR", "checkpoints"))
+    # --- 3. Environment and Path Configuration ---
+    paths_config = config.get("paths", {})
+    HF_HOME = os.getenv("HF_HOME", paths_config.get("hf_home", "./hf_cache"))
+    CHECKPOINT_DIR = Path(
+        os.getenv("CHECKPOINT_DIR", paths_config.get("checkpoint_dir", "checkpoints"))
+    )
     CHECKPOINT_DIR.mkdir(exist_ok=True)
-    LOG_DIR = Path(os.getenv("LOG_DIR", "logs"))
+    LOG_DIR = Path(os.getenv("LOG_DIR", paths_config.get("log_dir", "logs")))
     LOG_DIR.mkdir(exist_ok=True)
 
-    # --- 3. Logging Setup (Loguru) ---
+    # --- 4. Logging Setup (Loguru) ---
     logger.remove()  # Remove default logger
     logger.add(
         lambda msg: tqdm.write(msg, end=""), colorize=True, level="INFO"
@@ -100,14 +110,21 @@ def main():
     logger.add(LOG_DIR / "training_{time}.log", level="DEBUG")  # File logger
     logger.info("Starting training script...")
 
-    # --- 3. Training Configuration ---
-    MODEL_NAME = "gpt2"
-    BATCH_SIZE = 2
-    MAX_LENGTH = 1024
-    LEARNING_RATE = 5e-5
-    NUM_EPOCHS = 10  # Increased for early stopping
-    # DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    DEVICE = get_deivce()
+    # --- 5. Training Configuration ---
+    model_config = config["model"]
+    train_config = config["training"]
+    early_stop_config = config["early_stopping"]
+
+    MODEL_NAME = model_config["name"]
+    MAX_LENGTH = model_config["max_length"]
+    BATCH_SIZE = train_config["batch_size"]
+    LEARNING_RATE = train_config["learning_rate"]
+    NUM_EPOCHS = train_config["num_epochs"]
+
+    if train_config.get("device") == "auto":
+        DEVICE = get_deivce()
+    else:
+        DEVICE = train_config.get("device", "cpu")
 
     logger.info(f"Using device: {DEVICE}")
     logger.info(f"Hugging Face cache directory: {HF_HOME}")
@@ -130,9 +147,11 @@ def main():
     logger.info("Initializing model, trainer, and early stopper...")
     model = MemLLM(MODEL_NAME).to(DEVICE)
     trainer = MemoryTrainer(model, learning_rate=LEARNING_RATE)
-    early_stopper = EarlyStopper(patience=3, min_delta=0.01)
+    early_stopper = EarlyStopper(
+        patience=early_stop_config["patience"], min_delta=early_stop_config["min_delta"]
+    )
 
-    # --- 4. Load from Checkpoint (if available) ---
+    # --- 6. Load from Checkpoint (if available) ---
     start_epoch = 0
     latest_checkpoint = CHECKPOINT_DIR / "latest_checkpoint.pt"
     if latest_checkpoint.exists():
@@ -146,7 +165,7 @@ def main():
             f"Resuming training from epoch {start_epoch}. Best validation loss: {early_stopper.best_loss:.4f}"
         )
 
-    # --- 5. Training Loop ---
+    # --- 7. Training Loop ---
     for epoch in range(start_epoch, NUM_EPOCHS):
         logger.info(f"--- Starting Epoch {epoch + 1}/{NUM_EPOCHS} ---")
         model.train()
@@ -162,7 +181,7 @@ def main():
         val_loss = evaluate(model, val_dataloader, trainer, DEVICE)
         logger.info(f"Epoch {epoch + 1} finished. Validation Loss: {val_loss:.4f}")
 
-        # --- 6. Checkpointing ---
+        # --- 8. Checkpointing ---
         if val_loss < early_stopper.best_loss:
             logger.success(
                 f"New best validation loss: {val_loss:.4f}. Saving checkpoint."
@@ -178,7 +197,7 @@ def main():
                 checkpoint, latest_checkpoint
             )  # Overwrite latest for easy resume
 
-        # --- 7. Early Stopping ---
+        # --- 9. Early Stopping ---
         if early_stopper(val_loss):
             logger.warning("Early stopping triggered. Halting training.")
             break
@@ -195,4 +214,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Train a memory-augmented LLM on HotpotQA."
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="configs/default_config.yaml",
+        help="Path to the training configuration YAML file.",
+    )
+    args = parser.parse_args()
+    main(args.config)

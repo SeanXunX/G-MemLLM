@@ -1,0 +1,14 @@
+# Default evaluation configuration
+model:
+  name: "gpt2" # The base model name
+  max_length: 1024
+  # For MemLLM (eval_hotpotqa.py), the fine-tuned checkpoint to load
+  checkpoint_path: "hotpotqa_memory_module_final.pt"
+
+evaluation:
+  batch_size: 32
+  device: "auto" # 'auto' will let the script detect cuda/mps/cpu
+  max_new_tokens: 50 # Max tokens to generate for the answer
+
+paths:
+  log_dir: "logs"

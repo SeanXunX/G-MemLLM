@@ -1,0 +1,13 @@
+# Configuration for evaluating a memory-augmented Meta-Llama-3.1-8B model
+model:
+  name: "meta-llama/Llama-3.1-8B"
+  max_length: 128000 # Llama-3.1-8B's context window
+  checkpoint_path: "llama_3_1_8b_memory_module_final.pt" # Placeholder for future checkpoint
+
+evaluation:
+  batch_size: 1 # Start with 1 due to high memory usage with 128k context
+  device: "auto"
+  max_new_tokens: 100 # Allow more tokens for longer answers
+
+paths:
+  log_dir: "logs"
